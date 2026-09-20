@@ -214,19 +214,17 @@ This repo includes an `asana-release-notes-workflow` that:
 - Reads completed tickets for a sprint from Asana
 - Summarizes the sprint into a short release note with bullet points
 - Posts the rendered release note to Slack
-- Creates or updates a GitHub release with the same markdown
 
 Required environment variables:
 
 ```shell
 OPENAI_API_KEY=...
 ASANA_ACCESS_TOKEN=...
-GITHUB_TOKEN=...
-SLACK_RELEASE_WEBHOOK_URL=...
-GITHUB_REPOSITORY=owner/repo
+ASANA_PROGRAMS_PROJECT_GID=...
+ASANA_KOACHEX_PROJECT_GID=...
+SLACK_PROGRAMS_RELEASE_WEBHOOK_URL=...
+SLACK_KOACHEX_RELEASE_WEBHOOK_URL=...
 ```
-
-Workflow inputs:
 
 - `asanaProject`: dropdown selector for the Asana project, currently `Programs`
 - `sprintName`: sprint label to match
@@ -235,8 +233,6 @@ Workflow inputs:
 - `asanaSectionGid`: optional section filter for the sprint
 - `doneSectionName`: section name treated as done when the Asana task itself is not marked completed, defaults to `Done`
 - `slackWebhook`: dropdown selector for the Slack destination, currently `Programs`
-- `githubRepoOwner` and `githubRepoName`: optional overrides for `GITHUB_REPOSITORY`
-- `githubTagName`: optional override, otherwise the workflow derives a sprint tag automatically
 
 Run `npm run dev`, open Mastra Studio, and execute the registered workflow with the sprint inputs above.
 
@@ -335,8 +331,10 @@ Create these repository secrets before enabling the workflow:
 - `GOOGLE_REFRESH_TOKEN`
 - `GOOGLE_DRIVE_FOLDER_ID`
 - `ASANA_ACCESS_TOKEN`
-- `GITHUB_TOKEN`
-- `SLACK_RELEASE_WEBHOOK_URL`
+- `ASANA_PROGRAMS_PROJECT_GID`
+- `ASANA_KOACHEX_PROJECT_GID`
+- `SLACK_PROGRAMS_RELEASE_WEBHOOK_URL`
+- `SLACK_KOACHEX_RELEASE_WEBHOOK_URL`
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN`
 

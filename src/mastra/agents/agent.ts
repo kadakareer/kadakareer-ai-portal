@@ -6,7 +6,6 @@ import { Memory } from '@mastra/memory';
 import {
   fetchAsanaSprintTasksTool,
   postSlackReleaseNotesTool,
-  publishGithubReleaseNotesTool,
 } from '../tools/release-automation-tools';
 
 export const agent = new Agent({
@@ -31,7 +30,6 @@ Ask concise follow-up questions only when required identifiers or destinations a
     ask_user: askUserTool,
     fetch_asana_sprint_tasks: fetchAsanaSprintTasksTool,
     post_slack_release_notes: postSlackReleaseNotesTool,
-    publish_github_release_notes: publishGithubReleaseNotesTool,
     web_search: openai.tools.webSearch(),
   },
 });

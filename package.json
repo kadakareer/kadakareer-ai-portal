@@ -13,7 +13,10 @@
     "deploy:staging": "mastra deploy --env staging",
     "deploy:studio": "mastra studio deploy --project product-management-control --env-file .env.production",
     "deploy:ci": "mastra deploy --env production --yes",
-    "studio:deploy": "mastra studio deploy --project product-management-control"
+    "studio:deploy": "mastra studio deploy --project product-management-control",
+    "copilot-runtime": "cd apps/copilot-console && npm run copilot-runtime",
+    "console:dev": "cd apps/copilot-console && npm run dev",
+    "console:build": "cd apps/copilot-console && npm run build -- --configuration development"
   },
   "keywords": [],
   "author": "",

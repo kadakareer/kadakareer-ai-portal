@@ -2,7 +2,6 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 
 const ASANA_API_BASE_URL = 'https://app.asana.com/api/1.0';
-const GITHUB_API_BASE_URL = 'https://api.github.com';
 
 const asanaListResponseSchema = z.object({
   data: z.array(z.unknown()),
@@ -21,18 +20,18 @@ const sprintNameOptions = [
   'Sprint Q3.26.4',
 ] as const;
 
-const asanaProjectOptions = {
-  Programs: '1216814037200456',
-  KoachEx: '1216814037200456'
+const asanaProjectEnvVars = {
+  Programs: 'ASANA_PROGRAMS_PROJECT_GID',
+  KoachEx: 'ASANA_KOACHEX_PROJECT_GID'
 } as const;
 
-const slackWebhookOptions = {
-  Programs: 'https://hooks.slack.com/services/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',
-  KoachEx: 'https://hooks.slack.com/services/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',
+const slackWebhookEnvVars = {
+  Programs: 'SLACK_PROGRAMS_RELEASE_WEBHOOK_URL',
+  KoachEx: 'SLACK_KOACHEX_RELEASE_WEBHOOK_URL',
 } as const;
 
-const asanaProjectLabels = Object.keys(asanaProjectOptions) as [keyof typeof asanaProjectOptions];
-const slackWebhookLabels = Object.keys(slackWebhookOptions) as [keyof typeof slackWebhookOptions];
+const asanaProjectLabels = Object.keys(asanaProjectEnvVars) as [keyof typeof asanaProjectEnvVars];
+const slackWebhookLabels = Object.keys(slackWebhookEnvVars) as [keyof typeof slackWebhookEnvVars];
 
 export const asanaTaskSchema = z.object({
   gid: z.string(),
@@ -49,7 +48,7 @@ export const asanaTaskSchema = z.object({
 
 export const asanaSprintFetchInputSchema = z.object({
   asanaProject: z.enum(asanaProjectLabels).default('Programs').describe('Named Asana project to read sprint tickets from.'),
-  asanaProjectGid: z.enum(asanaProjectOptions).describe('Optional Asana project GID override. When omitted, the selected project label is used.'),
+  asanaProjectGid: z.string().min(1).optional().describe('Optional Asana project GID override. When omitted, the selected project label is used.'),
   sprintName: z.enum(sprintNameOptions).describe('Sprint name that should appear in the release notes.'),
   sprintFieldName: z.string().min(1).default('Sprint').describe('Asana custom field name used to store the sprint label.'),
   sprintFieldValue: z.string().min(1).optional().describe('Optional exact custom field value to match when it differs from sprintName.'),
@@ -68,35 +67,15 @@ export const asanaSprintFetchOutputSchema = z.object({
 export const slackReleasePostInputSchema = z.object({
   markdown: z.string().min(1).describe('Release note body to send to Slack.'),
   slackWebhook: z.enum(slackWebhookLabels).default('Programs').describe('Named Slack destination for the release note.'),
-  webhookUrl: z.url().optional().describe('Optional Slack incoming webhook URL override. Falls back to the selected destination or SLACK_RELEASE_WEBHOOK_URL.'),
+  webhookUrl: z.url().optional().describe('Optional Slack incoming webhook URL override. Falls back to the selected destination environment variable.'),
 });
 
 export const slackReleasePostOutputSchema = z.object({
   ok: z.boolean(),
 });
 
-export const githubReleasePublishInputSchema = z.object({
-  owner: z.string().min(1).optional().describe('GitHub repository owner. Falls back to GITHUB_REPOSITORY.'),
-  repo: z.string().min(1).optional().describe('GitHub repository name. Falls back to GITHUB_REPOSITORY.'),
-  tagName: z.string().min(1).describe('Git tag to create or update for this release note.'),
-  releaseName: z.string().min(1).describe('Display name of the GitHub release.'),
-  body: z.string().min(1).describe('Markdown release notes body.'),
-  targetCommitish: z.string().min(1).optional().describe('Optional branch or commit SHA for new releases.'),
-  draft: z.boolean().default(false),
-  prerelease: z.boolean().default(false),
-});
-
-export const githubReleasePublishOutputSchema = z.object({
-  id: z.number().int(),
-  url: z.string().url(),
-  htmlUrl: z.string().url(),
-  tagName: z.string(),
-  updated: z.boolean(),
-});
-
 type AsanaTask = z.infer<typeof asanaTaskSchema>;
 type AsanaSprintFetchInput = z.infer<typeof asanaSprintFetchInputSchema>;
-type GithubReleasePublishInput = z.infer<typeof githubReleasePublishInputSchema>;
 
 type AsanaApiTask = {
   gid?: string;
@@ -118,13 +97,6 @@ type AsanaApiTask = {
 };
 
 type AsanaCustomField = NonNullable<AsanaApiTask['custom_fields']>[number];
-
-type GithubReleaseResponse = {
-  id: number;
-  url: string;
-  html_url: string;
-  tag_name: string;
-};
 
 function requireValue(value: string | undefined, message: string) {
   if (!value) {
@@ -216,56 +188,15 @@ async function fetchJson<T>(url: string, init: RequestInit, label: string): Prom
   return JSON.parse(text) as T;
 }
 
-async function getGithubReleaseByTag(owner: string, repo: string, tagName: string, token: string) {
-  const response = await fetch(`${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/releases/tags/${encodeURIComponent(tagName)}`, {
-    headers: {
-      accept: 'application/vnd.github+json',
-      authorization: `Bearer ${token}`,
-      'user-agent': 'Mastra Release Automation/1.0',
-      'x-github-api-version': '2022-11-28',
-    },
-    signal: AbortSignal.timeout(20_000),
-  });
-
-  if (response.status === 404) {
-    return null;
-  }
-
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`GitHub release lookup failed with ${response.status} ${response.statusText}: ${text.slice(0, 500)}`);
-  }
-
-  return JSON.parse(text) as GithubReleaseResponse;
+function resolveAsanaProjectGid(project: keyof typeof asanaProjectEnvVars, projectGid?: string) {
+  return projectGid ?? requireValue(
+    process.env[asanaProjectEnvVars[project]],
+    `Asana project GID is required. Set ${asanaProjectEnvVars[project]} or provide asanaProjectGid.`,
+  );
 }
 
-function resolveGithubRepo(owner?: string, repo?: string) {
-  if (owner && repo) {
-    return { owner, repo };
-  }
-
-  const repository = process.env.GITHUB_REPOSITORY;
-  if (!repository) {
-    throw new Error('GitHub repository is required. Provide owner and repo inputs or set GITHUB_REPOSITORY=owner/repo.');
-  }
-
-  const [resolvedOwner, resolvedRepo] = repository.split('/');
-  if (!resolvedOwner || !resolvedRepo) {
-    throw new Error('GITHUB_REPOSITORY must be in the form owner/repo.');
-  }
-
-  return {
-    owner: owner ?? resolvedOwner,
-    repo: repo ?? resolvedRepo,
-  };
-}
-
-function resolveAsanaProjectGid(project: keyof typeof asanaProjectOptions, projectGid?: string) {
-  return projectGid ?? asanaProjectOptions[project];
-}
-
-function resolveSlackWebhookUrl(destination: keyof typeof slackWebhookOptions, webhookUrl?: string) {
-  return webhookUrl ?? slackWebhookOptions[destination] ?? process.env.SLACK_RELEASE_WEBHOOK_URL;
+function resolveSlackWebhookUrl(destination: keyof typeof slackWebhookEnvVars, webhookUrl?: string) {
+  return webhookUrl ?? process.env[slackWebhookEnvVars[destination]];
 }
 
 export async function fetchCompletedAsanaSprintTasks(input: AsanaSprintFetchInput) {
@@ -350,7 +281,7 @@ export async function fetchCompletedAsanaSprintTasks(input: AsanaSprintFetchInpu
 export async function postReleaseNotesToSlack(input: z.infer<typeof slackReleasePostInputSchema>) {
   const webhookUrl = requireValue(
     resolveSlackWebhookUrl(input.slackWebhook, input.webhookUrl),
-    'Slack webhook is required. Provide webhookUrl or set SLACK_RELEASE_WEBHOOK_URL.',
+    `Slack webhook is required. Provide webhookUrl or set ${slackWebhookEnvVars[input.slackWebhook]}.`,
   );
 
   const response = await fetch(webhookUrl, {
@@ -372,47 +303,6 @@ export async function postReleaseNotesToSlack(input: z.infer<typeof slackRelease
   return { ok: true };
 }
 
-export async function upsertGithubReleaseNotes(input: GithubReleasePublishInput) {
-  const token = requireValue(process.env.GITHUB_TOKEN, 'GITHUB_TOKEN is required to publish release notes to GitHub.');
-  const { owner, repo } = resolveGithubRepo(input.owner, input.repo);
-  const existingRelease = await getGithubReleaseByTag(owner, repo, input.tagName, token);
-
-  const payload = {
-    tag_name: input.tagName,
-    name: input.releaseName,
-    body: input.body,
-    draft: input.draft,
-    prerelease: input.prerelease,
-    target_commitish: input.targetCommitish,
-  };
-
-  const response = await fetchJson<GithubReleaseResponse>(
-    existingRelease
-      ? `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/releases/${existingRelease.id}`
-      : `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/releases`,
-    {
-      method: existingRelease ? 'PATCH' : 'POST',
-      headers: {
-        accept: 'application/vnd.github+json',
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-        'user-agent': 'Mastra Release Automation/1.0',
-        'x-github-api-version': '2022-11-28',
-      },
-      body: JSON.stringify(payload),
-    },
-    existingRelease ? 'GitHub release update' : 'GitHub release creation',
-  );
-
-  return {
-    id: response.id,
-    url: response.url,
-    htmlUrl: response.html_url,
-    tagName: response.tag_name,
-    updated: Boolean(existingRelease),
-  };
-}
-
 export const fetchAsanaSprintTasksTool = createTool({
   id: 'fetch_asana_sprint_tasks',
   description: 'Fetch completed Asana tasks for a sprint from a specific project.',
@@ -427,12 +317,4 @@ export const postSlackReleaseNotesTool = createTool({
   inputSchema: slackReleasePostInputSchema,
   outputSchema: slackReleasePostOutputSchema,
   execute: postReleaseNotesToSlack,
-});
-
-export const publishGithubReleaseNotesTool = createTool({
-  id: 'publish_github_release_notes',
-  description: 'Create or update a GitHub release with rendered release notes.',
-  inputSchema: githubReleasePublishInputSchema,
-  outputSchema: githubReleasePublishOutputSchema,
-  execute: upsertGithubReleaseNotes,
 });

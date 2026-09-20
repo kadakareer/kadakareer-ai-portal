@@ -204,6 +204,7 @@ type AuthTokenClaims = {
                 <span>Asana project</span>
                 <select [(ngModel)]="workflowInput.asanaProject" name="asanaProject">
                   <option value="Programs">Programs</option>
+                  <option value="KoachEx">KoachEx</option>
                 </select>
               </label>
 
@@ -211,6 +212,7 @@ type AuthTokenClaims = {
                 <span>Slack destination</span>
                 <select [(ngModel)]="workflowInput.slackWebhook" name="slackWebhook">
                   <option value="Programs">Programs</option>
+                  <option value="KoachEx">KoachEx</option>
                 </select>
               </label>
 

@@ -8,19 +8,7 @@ import {
   fetchCompletedAsanaSprintTasks,
   postReleaseNotesToSlack,
   slackReleasePostInputSchema,
-  upsertGithubReleaseNotes,
 } from '../tools/release-automation-tools';
-
-const githubConfigSchema = z.object({
-  publishToGithub: z.boolean().default(true),
-  githubRepoOwner: z.string().min(1).optional(),
-  githubRepoName: z.string().min(1).optional(),
-  githubTagName: z.string().min(1).optional(),
-  githubReleaseName: z.string().min(1).optional(),
-  githubTargetCommitish: z.string().min(1).optional(),
-  githubReleaseDraft: z.boolean().default(false),
-  githubReleasePrerelease: z.boolean().default(false),
-});
 
 const slackConfigSchema = z.object({
   publishToSlack: z.boolean().default(true),
@@ -34,7 +22,6 @@ export const asanaReleaseNotesWorkflowInputSchema = asanaSprintFetchInputSchema
   .extend({
     includeTaskLinks: z.boolean().default(true),
   })
-  .merge(githubConfigSchema)
   .merge(slackConfigSchema);
 
 const collectedTicketsSchema = asanaReleaseNotesWorkflowInputSchema.extend({
@@ -53,28 +40,9 @@ const renderedReleaseNotesSchema = generatedReleaseNotesSchema.extend({
   markdown: z.string(),
 });
 
-const githubReleaseSchema = z.object({
-  id: z.number().int(),
-  url: z.string().url(),
-  htmlUrl: z.string().url(),
-  tagName: z.string(),
-  updated: z.boolean(),
-});
-
 export const asanaReleaseNotesWorkflowOutputSchema = renderedReleaseNotesSchema.extend({
   slackPosted: z.boolean(),
-  githubRelease: githubReleaseSchema.nullable(),
 });
-
-function slugifySprintName(sprintName: string) {
-  const slug = sprintName
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-
-  return slug.length > 0 ? `sprint-${slug}` : 'sprint-release';
-}
 
 function formatTaskLine(task: z.infer<typeof asanaTaskSchema>, includeTaskLinks: boolean) {
   const details = [task.assignee ? `Owner: ${task.assignee}` : undefined, task.completedAt ? `Completed: ${task.completedAt}` : undefined]
@@ -106,7 +74,7 @@ const summarizeReleaseNotesStep = createStep({
   inputSchema: collectedTicketsSchema,
   outputSchema: generatedReleaseNotesSchema,
   execute: async ({ inputData }) => {
-    const releaseTitle = inputData.githubReleaseName ?? `${inputData.sprintName} Release Notes`;
+    const releaseTitle = `${inputData.sprintName} Release Notes`;
 
     if (inputData.taskCount === 0) {
       return {
@@ -157,7 +125,7 @@ const summarizeReleaseNotesStep = createStep({
 
 const renderReleaseNotesStep = createStep({
   id: 'render-release-notes',
-  description: 'Renders the generated release note sections into Markdown for Slack and GitHub.',
+  description: 'Renders the generated release note sections into Markdown for Slack.',
   inputSchema: generatedReleaseNotesSchema,
   outputSchema: renderedReleaseNotesSchema,
   execute: async ({ inputData }) => {
@@ -194,7 +162,7 @@ const renderReleaseNotesStep = createStep({
 
 const publishReleaseNotesStep = createStep({
   id: 'publish-release-notes',
-  description: 'Publishes the rendered release notes to Slack and GitHub.',
+  description: 'Publishes the rendered release notes to Slack.',
   inputSchema: renderedReleaseNotesSchema,
   outputSchema: asanaReleaseNotesWorkflowOutputSchema,
   execute: async ({ inputData }) => {
@@ -207,31 +175,16 @@ const publishReleaseNotesStep = createStep({
       slackPosted = true;
     }
 
-    let githubRelease: z.infer<typeof githubReleaseSchema> | null = null;
-    if (inputData.publishToGithub) {
-      githubRelease = await upsertGithubReleaseNotes({
-        owner: inputData.githubRepoOwner,
-        repo: inputData.githubRepoName,
-        tagName: inputData.githubTagName ?? slugifySprintName(inputData.sprintName),
-        releaseName: inputData.releaseTitle,
-        body: inputData.markdown,
-        targetCommitish: inputData.githubTargetCommitish,
-        draft: inputData.githubReleaseDraft,
-        prerelease: inputData.githubReleasePrerelease,
-      });
-    }
-
     return {
       ...inputData,
       slackPosted,
-      githubRelease,
     };
   },
 });
 
 export const asanaReleaseNotesWorkflow = createWorkflow({
   id: 'asana-release-notes-workflow',
-  description: 'Fetches completed Asana sprint tickets, summarizes them, and publishes release notes to Slack and GitHub.',
+  description: 'Fetches completed Asana sprint tickets, summarizes them, and publishes release notes to Slack.',
   inputSchema: asanaReleaseNotesWorkflowInputSchema,
   outputSchema: asanaReleaseNotesWorkflowOutputSchema,
 })

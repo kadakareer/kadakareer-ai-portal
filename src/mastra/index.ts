@@ -19,7 +19,6 @@ import {
 import {
   fetchAsanaSprintTasksTool,
   postSlackReleaseNotesTool,
-  publishGithubReleaseNotesTool,
 } from './tools/release-automation-tools';
 import { asanaReleaseNotesWorkflow } from './workflows/asana-release-notes-workflow';
 
@@ -30,7 +29,6 @@ export const mastra = new Mastra({
   tools: {
     fetchAsanaSprintTasksTool,
     postSlackReleaseNotesTool,
-    publishGithubReleaseNotesTool,
     getKadaKareerKnowledgeIndexStatusTool,
     searchKadaKareerKnowledgeIndexTool,
     syncKadaKareerKnowledgeIndexTool,
