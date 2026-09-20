@@ -8,13 +8,35 @@ import {
   Observability,
   SensitiveDataFilter,
 } from '@mastra/observability';
-import { agent } from './agents/agent';
-import { startScheduleTool, stopScheduleTool } from './tools/schedule-tools';
-import { webFetchTool } from './tools/web-fetch-tool';
+import { knowledgeBaseAgent } from './agents/knowledge-base-agent';
+import { releaseNotesAgent } from './agents/release-notes-agent';
+import { getGoogleDriveFileContentTool, searchGoogleDriveKnowledgeTool } from './tools/google-drive-knowledge-tools';
+import {
+  getKadaKareerKnowledgeIndexStatusTool,
+  searchKadaKareerKnowledgeIndexTool,
+  syncKadaKareerKnowledgeIndexTool,
+} from './tools/kadakareer-embedding-tools';
+import {
+  fetchAsanaSprintTasksTool,
+  postSlackReleaseNotesTool,
+  publishGithubReleaseNotesTool,
+} from './tools/release-automation-tools';
+import { asanaReleaseNotesWorkflow } from './workflows/asana-release-notes-workflow';
+
 
 export const mastra = new Mastra({
-  agents: { agent },
-  tools: { startScheduleTool, stopScheduleTool, webFetchTool },
+  agents: { releaseNotesAgent, knowledgeBaseAgent },
+  workflows: { asanaReleaseNotesWorkflow },
+  tools: {
+    fetchAsanaSprintTasksTool,
+    postSlackReleaseNotesTool,
+    publishGithubReleaseNotesTool,
+    getKadaKareerKnowledgeIndexStatusTool,
+    searchKadaKareerKnowledgeIndexTool,
+    syncKadaKareerKnowledgeIndexTool,
+    searchGoogleDriveKnowledgeTool,
+    getGoogleDriveFileContentTool,
+  },
   storage: new MastraCompositeStore({
     id: 'composite-storage',
     default: new LibSQLStore({

@@ -1,59 +1,24 @@
-import { pathToFileURL } from 'node:url';
-
 import { openai } from '@ai-sdk/openai';
 import { Agent } from '@mastra/core/agent';
-import { TaskSignalProvider } from '@mastra/core/signals';
 import { askUserTool } from '@mastra/core/tools';
-import { LocalFilesystem, LocalSandbox, WORKSPACE_TOOLS, Workspace } from '@mastra/core/workspace';
 import { Memory } from '@mastra/memory';
 
-import { webFetchTool } from '../tools/web-fetch-tool';
-import { startScheduleTool, stopScheduleTool } from '../tools/schedule-tools';
-
-const workspacePath = 'workspace';
-
-const workspace = new Workspace({
-  id: 'agent-workspace',
-  name: 'Agent Workspace',
-  filesystem: new LocalFilesystem({
-    basePath: workspacePath,
-  }),
-  sandbox: new LocalSandbox({
-    workingDirectory: workspacePath,
-  }),
-  tools: {
-    [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: {
-      requireReadBeforeWrite: true,
-    },
-    [WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE]: {
-      requireReadBeforeWrite: true,
-    },
-    [WORKSPACE_TOOLS.FILESYSTEM.DELETE]: {
-      requireApproval: true,
-    },
-  },
-});
+import {
+  fetchAsanaSprintTasksTool,
+  postSlackReleaseNotesTool,
+  publishGithubReleaseNotesTool,
+} from '../tools/release-automation-tools';
 
 export const agent = new Agent({
   id: 'agent',
-  name: 'Agent',
-  description:
-    'A general-purpose assistant that can research, manage tasks, work with local files, run approved commands, and create recurring schedules.',
-  instructions: `You are a friendly starter agent for exploring what Mastra can do. Help the user try useful capabilities, build small projects, answer current questions, and shape this harness into a starting point for future work.
+  name: 'Release Automation Agent',
+  description: 'Helps collect sprint tickets from Asana and prepare release notes for Slack and GitHub.',
+  instructions: `You help produce sprint release notes from Asana tickets.
 
-Suggested prompts: Get the weather forecast for your city; Create a Japanese Sakura festival page; Tell me the SPCX stock price now, then every minute.
-
-When the user greets you or does not have a specific task, invite them to try the suggested prompts.
-
-Ask concise questions when something is unclear or a good question could surface a useful insight.
-
-For local file changes, end with a plain-text URL using ${pathToFileURL(`${workspacePath}/`).href}; avoid Markdown links, localhost, /workspace, relative paths, and static-file servers.
-`,
+When the user wants release notes, collect the sprint context, fetch completed sprint tickets, and produce a concise release summary.
+Use only the provided ticket data for summaries and release bullets.
+Ask concise follow-up questions only when required identifiers or destinations are missing.`,
   model: 'openai/gpt-5.6-terra',
-  defaultOptions: {
-    maxSteps: 100,
-    autoResumeSuspendedTools: true,
-  },
   memory: new Memory({
     options: {
       generateTitle: true,
@@ -62,13 +27,11 @@ For local file changes, end with a plain-text URL using ${pathToFileURL(`${works
       },
     },
   }),
-  workspace,
   tools: {
     ask_user: askUserTool,
-    start_schedule: startScheduleTool,
-    stop_schedule: stopScheduleTool,
-    web_fetch: webFetchTool,
+    fetch_asana_sprint_tasks: fetchAsanaSprintTasksTool,
+    post_slack_release_notes: postSlackReleaseNotesTool,
+    publish_github_release_notes: publishGithubReleaseNotesTool,
     web_search: openai.tools.webSearch(),
   },
-  signals: [new TaskSignalProvider()],
 });

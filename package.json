@@ -7,7 +7,13 @@
   "scripts": {
     "dev": "mastra dev",
     "build": "mastra build",
-    "start": "mastra start"
+    "start": "mastra start",
+    "lint:preflight": "mastra lint --preflight",
+    "deploy": "mastra deploy --env production",
+    "deploy:staging": "mastra deploy --env staging",
+    "deploy:studio": "mastra studio deploy --project product-management-control --env-file .env.production",
+    "deploy:ci": "mastra deploy --env production --yes",
+    "studio:deploy": "mastra studio deploy --project product-management-control"
   },
   "keywords": [],
   "author": "",
@@ -17,16 +23,18 @@
     "node": ">=22.13.0"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.8",
     "@mastra/core": "latest",
     "@mastra/duckdb": "latest",
     "@mastra/libsql": "latest",
     "@mastra/memory": "latest",
     "@mastra/observability": "latest",
-    "zod": "^4.4.3",
-    "@ai-sdk/openai": "^4.0.8"
+    "pg": "^8.23.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "latest",
+    "@types/pg": "^8.23.1",
     "mastra": "latest",
     "typescript": "^6.0.3"
   }
