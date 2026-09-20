@@ -25,6 +25,7 @@ export const asanaReleaseNotesWorkflowInputSchema = asanaSprintFetchInputSchema
   .merge(slackConfigSchema);
 
 const collectedTicketsSchema = asanaReleaseNotesWorkflowInputSchema.extend({
+  asanaProjectGidSuffix: z.string(),
   tasks: z.array(asanaTaskSchema),
   taskCount: z.number().int().nonnegative(),
 });
@@ -58,10 +59,15 @@ const collectSprintTicketsStep = createStep({
   inputSchema: asanaReleaseNotesWorkflowInputSchema,
   outputSchema: collectedTicketsSchema,
   execute: async ({ inputData }) => {
+    if (inputData.asanaProject !== inputData.slackWebhook) {
+      throw new Error(`Asana project (${inputData.asanaProject}) must match Slack destination (${inputData.slackWebhook}).`);
+    }
+
     const result = await fetchCompletedAsanaSprintTasks(inputData);
 
     return {
       ...inputData,
+      asanaProjectGidSuffix: result.asanaProjectGidSuffix,
       tasks: result.tasks,
       taskCount: result.taskCount,
     };
@@ -137,6 +143,8 @@ const renderReleaseNotesStep = createStep({
 
     const markdown = [
       `# ${inputData.releaseTitle}`,
+      '',
+      `Asana project: ${inputData.asanaProject} (${inputData.asanaProjectGidSuffix})`,
       '',
       `Sprint: ${inputData.sprintName}`,
       '',

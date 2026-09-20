@@ -21,6 +21,12 @@ type WorkflowInfo = {
   description?: string;
 };
 
+type WorkflowRunStatus = {
+  runId: string;
+  status?: string;
+  updatedAt?: string;
+};
+
 type NavItem = {
   id: string;
   label: string;
@@ -73,7 +79,7 @@ type AuthTokenClaims = {
       <aside class="sidebar">
         <div class="sidebar__header">
           <p class="eyebrow">KadaKareer Console</p>
-          <h1>Digital career control room</h1>
+          <h1>Agent Assistant Platform</h1>
           <p class="sidebar__copy">Chat with the knowledge agent, sync the Neon index, or run internal workflows.</p>
         </div>
 
@@ -164,7 +170,10 @@ type AuthTokenClaims = {
         @if (selectedItem()?.kind === 'agent') {
           <section class="panel panel--chat">
             @if (isRuntimeReady()) {
-              <copilot-chat [agentId]="selectedItem()!.id"></copilot-chat>
+              <copilot-chat
+                [agentId]="selectedItem()!.id"
+                [threadId]="selectedAgentThreadId()"
+              ></copilot-chat>
             } @else {
               <div class="chat-skeleton">
                 <div class="message-skeleton message-skeleton--assistant">
@@ -202,7 +211,7 @@ type AuthTokenClaims = {
 
               <label>
                 <span>Asana project</span>
-                <select [(ngModel)]="workflowInput.asanaProject" name="asanaProject">
+                <select [(ngModel)]="workflowInput.asanaProject" name="asanaProject" (ngModelChange)="syncReleaseDestination($event)">
                   <option value="Programs">Programs</option>
                   <option value="KoachEx">KoachEx</option>
                 </select>
@@ -210,7 +219,7 @@ type AuthTokenClaims = {
 
               <label>
                 <span>Slack destination</span>
-                <select [(ngModel)]="workflowInput.slackWebhook" name="slackWebhook">
+                <select [(ngModel)]="workflowInput.slackWebhook" name="slackWebhook" (ngModelChange)="syncReleaseDestination($event)">
                   <option value="Programs">Programs</option>
                   <option value="KoachEx">KoachEx</option>
                 </select>
@@ -246,7 +255,12 @@ type AuthTokenClaims = {
 
             @if (workflowRunId()) {
               <div class="run-result">
-                <strong>Last run ID</strong>
+                <div class="run-result__header">
+                  <strong>Last run ID</strong>
+                  @if (workflowStatus()) {
+                    <span class="status-pill">{{ workflowStatus() }}</span>
+                  }
+                </div>
                 <code>{{ workflowRunId() }}</code>
               </div>
             }
@@ -897,6 +911,24 @@ type AuthTokenClaims = {
       gap: 6px;
     }
 
+    .run-result__header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .status-pill {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: white;
+      color: var(--blue);
+      padding: 3px 9px;
+      font-size: 0.75rem;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
     .run-result--error {
       background: #ffe6e0;
       border-color: var(--border);
@@ -933,10 +965,11 @@ export class AppComponent {
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
   private readonly copilotKit = inject(CopilotKit);
+  private readonly chatSessionId = crypto.randomUUID();
   private readonly mastraApiBaseUrl = 'http://localhost:8200/api/mastra';
   private readonly hiddenAgentIds = new Set(['knowledge-base-agent-input-processor']);
   private readonly hiddenWorkflowIds = new Set(['knowledge-base-agent-input-processor']);
-  protected readonly skeletonCards = Array.from({ length: 2 });
+  protected readonly skeletonCards = Array.from({ length: 3 });
 
   protected readonly isLoading$ = this.auth.isLoading$;
   protected readonly isAuthenticated$ = this.auth.isAuthenticated$;
@@ -947,6 +980,7 @@ export class AppComponent {
   protected readonly selectedItem = signal<NavItem | null>(null);
   protected readonly isTriggering = signal(false);
   protected readonly workflowRunId = signal('');
+  protected readonly workflowStatus = signal('');
   protected readonly workflowError = signal('');
   protected readonly indexStatus = signal<KnowledgeIndexStatus | null>(null);
   protected readonly isSyncingIndex = signal(false);
@@ -986,6 +1020,11 @@ export class AppComponent {
   protected readonly isKnowledgeAgent = computed(
     () => this.selectedItem()?.kind === 'agent' && this.selectedItem()?.id === 'knowledge-base-agent',
   );
+
+  protected readonly selectedAgentThreadId = computed(() => {
+    const item = this.selectedItem();
+    return item?.kind === 'agent' ? `${this.chatSessionId}:${item.id}` : '';
+  });
 
   protected readonly isConsoleLoading = computed(
     () => !this.isRuntimeReady() || !this.selectedItem(),
@@ -1049,6 +1088,7 @@ export class AppComponent {
     const isAdmin = permissions.has('admin');
     this.allowedAgentIds.set(new Set([
       ...(isAdmin || permissions.has('knowledge-agent:chat') ? ['knowledge-base-agent'] : []),
+      ...(isAdmin || permissions.has('asana-agent:chat') ? ['asana-agent'] : []),
       ...(isAdmin ? ['release-notes-agent'] : []),
     ]));
     this.allowedWorkflowIds.set(new Set([
@@ -1081,6 +1121,7 @@ export class AppComponent {
       Admin: ['admin'],
       'Console Admin': ['admin'],
       'Knowledge Agent User': ['knowledge-agent:chat'],
+      'Asana Agent User': ['asana-agent:chat'],
       'Release Notes User': ['release-notes:execute'],
     };
 
@@ -1128,8 +1169,15 @@ export class AppComponent {
     });
   }
 
+  protected syncReleaseDestination(destination: 'Programs' | 'KoachEx') {
+    this.workflowInput.asanaProject = destination;
+    this.workflowInput.slackWebhook = destination;
+  }
+
   protected selectItem(item: NavItem) {
     this.selectedItem.set(item);
+    this.workflowRunId.set('');
+    this.workflowStatus.set('');
     this.workflowError.set('');
     this.indexMessage.set('');
     this.indexError.set('');
@@ -1221,6 +1269,7 @@ export class AppComponent {
 
       const runId = createRun.runId;
       this.workflowRunId.set(runId);
+      this.workflowStatus.set('created');
 
       await this.mastraPost(`/workflows/${workflowId}/start-async?runId=${encodeURIComponent(runId)}`, {
         inputData: {
@@ -1230,10 +1279,30 @@ export class AppComponent {
             : undefined,
           },
       });
+      this.workflowStatus.set('started');
+      void this.pollWorkflowStatus(workflowId, runId);
     } catch (error) {
       this.workflowError.set(error instanceof Error ? error.message : 'Failed to trigger workflow.');
     } finally {
       this.isTriggering.set(false);
+    }
+  }
+
+  private async pollWorkflowStatus(workflowId: string, runId: string, attempt = 0) {
+    if (attempt > 60 || this.workflowRunId() !== runId) {
+      return;
+    }
+
+    try {
+      const result = await this.mastraGet<WorkflowRunStatus>(`/workflows/${workflowId}/runs/${runId}`);
+      const status = result.status ?? 'unknown';
+      this.workflowStatus.set(status);
+
+      if (!['success', 'failed', 'canceled', 'cancelled', 'completed'].includes(status.toLowerCase())) {
+        window.setTimeout(() => void this.pollWorkflowStatus(workflowId, runId, attempt + 1), 2000);
+      }
+    } catch {
+      window.setTimeout(() => void this.pollWorkflowStatus(workflowId, runId, attempt + 1), 3000);
     }
   }
 
@@ -1255,6 +1324,11 @@ export class AppComponent {
           id: 'knowledge-base-agent',
           name: 'KadaKareer Knowledge Agent',
           description: 'Expert on everything KadaKareer, grounded in the Neon knowledge index.',
+        },
+        {
+          id: 'asana-agent',
+          name: 'Asana Agent',
+          description: 'Product manager style status assistant for Programs and KoachEx Asana boards.',
         },
         {
           id: 'release-notes-agent',

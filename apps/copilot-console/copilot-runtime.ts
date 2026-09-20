@@ -11,6 +11,7 @@ import { auth0Config } from './src/app/auth0.config';
 const agents = {
   default: new MastraAgent({ agent: mastra.getAgent('knowledgeBaseAgent') }),
   'knowledge-base-agent': new MastraAgent({ agent: mastra.getAgent('knowledgeBaseAgent') }),
+  'asana-agent': new MastraAgent({ agent: mastra.getAgent('asanaAgent') }),
   'release-notes-agent': new MastraAgent({ agent: mastra.getAgent('releaseNotesAgent') }),
 };
 
@@ -22,6 +23,7 @@ const jwks = createRemoteJWKSet(new URL(`${auth0Issuer}.well-known/jwks.json`));
 const permissions = {
   admin: 'admin',
   knowledgeChat: 'knowledge-agent:chat',
+  asanaChat: 'asana-agent:chat',
   releaseNotesExecute: 'release-notes:execute',
 };
 
@@ -104,7 +106,10 @@ function canAccessAgent(payload, agentId) {
     return true;
   }
 
-  return agentId === 'knowledge-base-agent' && hasPermission(payload, permissions.knowledgeChat);
+  return (
+    (agentId === 'knowledge-base-agent' && hasPermission(payload, permissions.knowledgeChat)) ||
+    (agentId === 'asana-agent' && hasPermission(payload, permissions.asanaChat))
+  );
 }
 
 function canAccessWorkflow(payload, workflowId) {
@@ -178,7 +183,7 @@ async function sendAuthDiagnostics(request, response) {
       diagnostics: getTokenDiagnostics(token),
       permissions: [...getPermissionSet(payload)],
       claims: getClaimSummary(payload),
-      allowedAgents: ['knowledge-base-agent', 'release-notes-agent'].filter(agentId => canAccessAgent(payload, agentId)),
+      allowedAgents: ['knowledge-base-agent', 'asana-agent', 'release-notes-agent'].filter(agentId => canAccessAgent(payload, agentId)),
       allowedWorkflows: ['asanaReleaseNotesWorkflow', 'knowledge-base-agent-input-processor'].filter(workflowId =>
         canAccessWorkflow(payload, workflowId),
       ),
@@ -303,7 +308,7 @@ async function requireAuthHeader(request, response) {
   const pathname = new URL(request.url ?? '/', `http://localhost:${port}`).pathname;
   const agentId = pathname.match(/^\/api\/copilotkit\/agent\/([^/]+)/)?.[1];
   if (agentId && !canAccessAgent(payload, decodeURIComponent(agentId))) {
-    sendJson(response, 403, { error: 'Missing required permission: knowledge-agent:chat.' });
+    sendJson(response, 403, { error: 'Missing required agent chat permission.' });
     return false;
   }
 

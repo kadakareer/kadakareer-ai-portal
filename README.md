@@ -42,7 +42,7 @@ export const auth0Config = {
 	clientId: 'YOUR_AUTH0_CLIENT_ID',
 	connection: 'Username-Password-Authentication',
 	audience: 'http://localhost:4111/api',
-	scope: 'openid profile email knowledge-agent:chat release-notes:execute admin',
+	scope: 'openid profile email knowledge-agent:chat asana-agent:chat release-notes:execute admin',
 };
 ```
 
@@ -71,6 +71,7 @@ Add these API permissions in Auth0:
 Auth0 Dashboard -> Applications -> APIs -> Local Mastra API -> Permissions
 
 knowledge-agent:chat      Allows the user to see and chat with the KadaKareer Knowledge Agent
+asana-agent:chat          Allows the user to see and chat with the Asana Agent
 release-notes:execute     Allows the user to see and execute the release notes workflow
 admin                     Allows the user to see all agents and workflows
 ```
@@ -89,6 +90,7 @@ Create roles and assign them to users:
 Auth0 Dashboard -> User Management -> Roles
 
 Knowledge Agent User: knowledge-agent:chat
+Asana Agent User: asana-agent:chat
 Release Notes User: release-notes:execute
 Console Admin: admin
 ```
@@ -116,6 +118,7 @@ exports.onExecutePostLogin = async (event, api) => {
 
 	const rolePermissions = {
 		'Knowledge Agent User': ['knowledge-agent:chat'],
+		'Asana Agent User': ['asana-agent:chat'],
 		'Release Notes User': ['release-notes:execute'],
 		'Console Admin': ['admin'],
 	};
@@ -161,7 +164,7 @@ or:
 
 ```json
 {
-	"permissions": ["knowledge-agent:chat", "release-notes:execute"]
+	"permissions": ["knowledge-agent:chat", "asana-agent:chat", "release-notes:execute"]
 }
 ```
 
@@ -235,6 +238,26 @@ SLACK_KOACHEX_RELEASE_WEBHOOK_URL=...
 - `slackWebhook`: dropdown selector for the Slack destination, currently `Programs`
 
 Run `npm run dev`, open Mastra Studio, and execute the registered workflow with the sprint inputs above.
+
+## Asana Agent
+
+This repo includes an `asana-agent` that acts like a product manager for the Programs and KoachEx Asana boards. It can answer project status questions, summarize what is happening in a board, inspect sprint progress, and search tickets by sprint, status, owner, section, or keyword.
+
+Required environment variables:
+
+```shell
+OPENAI_API_KEY=...
+ASANA_ACCESS_TOKEN=...
+ASANA_PROGRAMS_PROJECT_GID=...
+ASANA_KOACHEX_PROJECT_GID=...
+```
+
+The agent is read-only. It uses:
+
+- `get_asana_project_status` for project, sprint, section, and assignee summaries
+- `query_asana_project_tasks` for specific ticket/status questions
+
+Grant `asana-agent:chat` in Auth0 to let a non-admin user see and chat with this agent.
 
 ## KadaKareer Knowledge Agent
 

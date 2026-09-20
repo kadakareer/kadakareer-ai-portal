@@ -10,6 +10,7 @@ import {
 } from '@mastra/observability';
 import { knowledgeBaseAgent } from './agents/knowledge-base-agent';
 import { releaseNotesAgent } from './agents/release-notes-agent';
+import { asanaAgent } from './agents/asana-agent';
 import { getGoogleDriveFileContentTool, searchGoogleDriveKnowledgeTool } from './tools/google-drive-knowledge-tools';
 import {
   getKadaKareerKnowledgeIndexStatusTool,
@@ -18,16 +19,20 @@ import {
 } from './tools/kadakareer-embedding-tools';
 import {
   fetchAsanaSprintTasksTool,
+  getAsanaProjectStatusTool,
   postSlackReleaseNotesTool,
+  queryAsanaProjectTasksTool,
 } from './tools/release-automation-tools';
 import { asanaReleaseNotesWorkflow } from './workflows/asana-release-notes-workflow';
 
 
 export const mastra = new Mastra({
-  agents: { releaseNotesAgent, knowledgeBaseAgent },
+  agents: { releaseNotesAgent, knowledgeBaseAgent, asanaAgent },
   workflows: { asanaReleaseNotesWorkflow },
   tools: {
     fetchAsanaSprintTasksTool,
+    getAsanaProjectStatusTool,
+    queryAsanaProjectTasksTool,
     postSlackReleaseNotesTool,
     getKadaKareerKnowledgeIndexStatusTool,
     searchKadaKareerKnowledgeIndexTool,

@@ -33,6 +33,8 @@ const slackWebhookEnvVars = {
 const asanaProjectLabels = Object.keys(asanaProjectEnvVars) as [keyof typeof asanaProjectEnvVars];
 const slackWebhookLabels = Object.keys(slackWebhookEnvVars) as [keyof typeof slackWebhookEnvVars];
 
+type AsanaProjectLabel = keyof typeof asanaProjectEnvVars;
+
 export const asanaTaskSchema = z.object({
   gid: z.string(),
   name: z.string(),
@@ -60,8 +62,57 @@ export const asanaSprintFetchInputSchema = z.object({
 
 export const asanaSprintFetchOutputSchema = z.object({
   sprintName: z.string(),
+  asanaProjectGidSuffix: z.string(),
   tasks: z.array(asanaTaskSchema),
   taskCount: z.number().int().nonnegative(),
+});
+
+export const asanaProjectTaskQueryInputSchema = z.object({
+  asanaProject: z.enum(asanaProjectLabels).default('Programs').describe('Named Asana project to inspect.'),
+  asanaProjectGid: z.string().min(1).optional().describe('Optional Asana project GID override. When omitted, the selected project label is used.'),
+  query: z.string().min(1).optional().describe('Optional text to match in task title, notes, assignee, section, or sprint value.'),
+  sprintName: z.string().min(1).optional().describe('Optional sprint value to filter tasks by.'),
+  sprintFieldName: z.string().min(1).default('Sprints').describe('Asana custom field name used to store the sprint label.'),
+  sectionName: z.string().min(1).optional().describe('Optional section name to filter tasks by.'),
+  assignee: z.string().min(1).optional().describe('Optional assignee name to filter tasks by.'),
+  completed: z.boolean().optional().describe('Optional completion state filter.'),
+  completedSince: z.string().optional().describe('Optional ISO timestamp lower bound for completed task lookup.'),
+  maxTasks: z.number().int().min(1).max(200).default(100).describe('Maximum number of project tasks to inspect.'),
+});
+
+export const asanaProjectTaskQueryOutputSchema = z.object({
+  asanaProject: z.enum(asanaProjectLabels),
+  asanaProjectGidSuffix: z.string(),
+  tasks: z.array(asanaTaskSchema),
+  taskCount: z.number().int().nonnegative(),
+});
+
+export const asanaProjectStatusInputSchema = z.object({
+  asanaProject: z.enum(asanaProjectLabels).default('Programs').describe('Named Asana project to summarize.'),
+  asanaProjectGid: z.string().min(1).optional().describe('Optional Asana project GID override. When omitted, the selected project label is used.'),
+  sprintFieldName: z.string().min(1).default('Sprints').describe('Asana custom field name used to group sprint status.'),
+  completedSince: z.string().optional().describe('Optional ISO timestamp lower bound for completed task lookup.'),
+  maxTasks: z.number().int().min(1).max(200).default(200).describe('Maximum number of project tasks to inspect.'),
+});
+
+const asanaBreakdownSchema = z.object({
+  name: z.string(),
+  count: z.number().int().nonnegative(),
+  completedCount: z.number().int().nonnegative(),
+  incompleteCount: z.number().int().nonnegative(),
+});
+
+export const asanaProjectStatusOutputSchema = z.object({
+  asanaProject: z.enum(asanaProjectLabels),
+  asanaProjectGidSuffix: z.string(),
+  taskCount: z.number().int().nonnegative(),
+  completedCount: z.number().int().nonnegative(),
+  incompleteCount: z.number().int().nonnegative(),
+  sectionBreakdown: z.array(asanaBreakdownSchema),
+  sprintBreakdown: z.array(asanaBreakdownSchema),
+  assigneeBreakdown: z.array(asanaBreakdownSchema),
+  recentlyCompletedTasks: z.array(asanaTaskSchema),
+  openTasks: z.array(asanaTaskSchema),
 });
 
 export const slackReleasePostInputSchema = z.object({
@@ -76,6 +127,8 @@ export const slackReleasePostOutputSchema = z.object({
 
 type AsanaTask = z.infer<typeof asanaTaskSchema>;
 type AsanaSprintFetchInput = z.infer<typeof asanaSprintFetchInputSchema>;
+type AsanaProjectTaskQueryInput = z.infer<typeof asanaProjectTaskQueryInputSchema>;
+type AsanaProjectStatusInput = z.infer<typeof asanaProjectStatusInputSchema>;
 
 type AsanaApiTask = {
   gid?: string;
@@ -188,7 +241,7 @@ async function fetchJson<T>(url: string, init: RequestInit, label: string): Prom
   return JSON.parse(text) as T;
 }
 
-function resolveAsanaProjectGid(project: keyof typeof asanaProjectEnvVars, projectGid?: string) {
+function resolveAsanaProjectGid(project: AsanaProjectLabel, projectGid?: string) {
   return projectGid ?? requireValue(
     process.env[asanaProjectEnvVars[project]],
     `Asana project GID is required. Set ${asanaProjectEnvVars[project]} or provide asanaProjectGid.`,
@@ -199,8 +252,165 @@ function resolveSlackWebhookUrl(destination: keyof typeof slackWebhookEnvVars, w
   return webhookUrl ?? process.env[slackWebhookEnvVars[destination]];
 }
 
+async function fetchAsanaProjectTasks(input: {
+  asanaProject: AsanaProjectLabel;
+  asanaProjectGid?: string;
+  sprintFieldName: string;
+  completedSince?: string;
+  maxTasks: number;
+}) {
+  const token = requireValue(process.env['ASANA_ACCESS_TOKEN'], 'ASANA_ACCESS_TOKEN is required to read tickets from Asana.');
+  const asanaProjectGid = resolveAsanaProjectGid(input.asanaProject, input.asanaProjectGid);
+  const tasks: AsanaTask[] = [];
+  let offset: string | undefined;
+
+  while (tasks.length < input.maxTasks) {
+    const url = new URL(`${ASANA_API_BASE_URL}/projects/${asanaProjectGid}/tasks`);
+    url.searchParams.set('completed_since', input.completedSince ?? '1970-01-01T00:00:00.000Z');
+    url.searchParams.set('limit', String(Math.min(100, input.maxTasks - tasks.length)));
+    url.searchParams.set(
+      'opt_fields',
+      [
+        'gid',
+        'name',
+        'notes',
+        'completed',
+        'completed_at',
+        'completed_by.name',
+        'assignee.name',
+        'permalink_url',
+        'memberships.section.gid',
+        'memberships.section.name',
+        'custom_fields.name',
+        'custom_fields.display_value',
+        'custom_fields.text_value',
+        'custom_fields.number_value',
+        'custom_fields.enum_value.name',
+      ].join(','),
+    );
+
+    if (offset) {
+      url.searchParams.set('offset', offset);
+    }
+
+    const response = asanaListResponseSchema.parse(
+      await fetchJson<unknown>(
+        url.toString(),
+        {
+          headers: {
+            accept: 'application/json',
+            authorization: `Bearer ${token}`,
+            'user-agent': 'Mastra Asana Agent/1.0',
+          },
+        },
+        'Asana project task fetch',
+      ),
+    );
+
+    const pageTasks = response.data as AsanaApiTask[];
+    tasks.push(...pageTasks.map(task => toAsanaTask(task, input.sprintFieldName)));
+
+    if (!response.next_page?.offset || pageTasks.length === 0) {
+      break;
+    }
+
+    offset = response.next_page.offset;
+  }
+
+  return { asanaProjectGid, tasks };
+}
+
+function includesQuery(task: AsanaTask, query?: string) {
+  if (!query) {
+    return true;
+  }
+
+  const needle = normalizeValue(query);
+  return [
+    task.name,
+    task.notes,
+    task.assignee,
+    task.sectionName,
+    task.sprintValue,
+    task.completedBy,
+  ].some(value => value ? normalizeValue(value).includes(needle) : false);
+}
+
+function buildBreakdown(tasks: AsanaTask[], getName: (task: AsanaTask) => string | null) {
+  const counts = new Map<string, { count: number; completedCount: number; incompleteCount: number }>();
+
+  for (const task of tasks) {
+    const name = getName(task) || 'Unspecified';
+    const current = counts.get(name) ?? { count: 0, completedCount: 0, incompleteCount: 0 };
+    current.count += 1;
+    if (task.completed) {
+      current.completedCount += 1;
+    } else {
+      current.incompleteCount += 1;
+    }
+    counts.set(name, current);
+  }
+
+  return [...counts.entries()]
+    .map(([name, value]) => ({ name, ...value }))
+    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
+}
+
+function byMostRecentCompletion(left: AsanaTask, right: AsanaTask) {
+  return Date.parse(right.completedAt ?? '') - Date.parse(left.completedAt ?? '');
+}
+
+export async function queryAsanaProjectTasks(input: AsanaProjectTaskQueryInput) {
+  const { asanaProjectGid, tasks } = await fetchAsanaProjectTasks(input);
+  const filteredTasks = tasks.filter(task => {
+    if (typeof input.completed === 'boolean' && task.completed !== input.completed) {
+      return false;
+    }
+
+    if (input.sprintName && normalizeValue(task.sprintValue ?? '') !== normalizeValue(input.sprintName)) {
+      return false;
+    }
+
+    if (input.sectionName && normalizeValue(task.sectionName ?? '') !== normalizeValue(input.sectionName)) {
+      return false;
+    }
+
+    if (input.assignee && normalizeValue(task.assignee ?? '') !== normalizeValue(input.assignee)) {
+      return false;
+    }
+
+    return includesQuery(task, input.query);
+  });
+
+  return {
+    asanaProject: input.asanaProject,
+    asanaProjectGidSuffix: asanaProjectGid.slice(-6),
+    tasks: filteredTasks,
+    taskCount: filteredTasks.length,
+  };
+}
+
+export async function getAsanaProjectStatus(input: AsanaProjectStatusInput) {
+  const { asanaProjectGid, tasks } = await fetchAsanaProjectTasks(input);
+  const completedTasks = tasks.filter(task => task.completed);
+  const openTasks = tasks.filter(task => !task.completed);
+
+  return {
+    asanaProject: input.asanaProject,
+    asanaProjectGidSuffix: asanaProjectGid.slice(-6),
+    taskCount: tasks.length,
+    completedCount: completedTasks.length,
+    incompleteCount: openTasks.length,
+    sectionBreakdown: buildBreakdown(tasks, task => task.sectionName),
+    sprintBreakdown: buildBreakdown(tasks, task => task.sprintValue),
+    assigneeBreakdown: buildBreakdown(tasks, task => task.assignee),
+    recentlyCompletedTasks: completedTasks.sort(byMostRecentCompletion).slice(0, 10),
+    openTasks: openTasks.slice(0, 20),
+  };
+}
+
 export async function fetchCompletedAsanaSprintTasks(input: AsanaSprintFetchInput) {
-  const token = requireValue(process.env.ASANA_ACCESS_TOKEN, 'ASANA_ACCESS_TOKEN is required to read sprint tickets from Asana.');
+  const token = requireValue(process.env['ASANA_ACCESS_TOKEN'], 'ASANA_ACCESS_TOKEN is required to read sprint tickets from Asana.');
   const asanaProjectGid = resolveAsanaProjectGid(input.asanaProject, input.asanaProjectGid);
   const tasks: AsanaTask[] = [];
   let offset: string | undefined;
@@ -273,6 +483,7 @@ export async function fetchCompletedAsanaSprintTasks(input: AsanaSprintFetchInpu
 
   return {
     sprintName: input.sprintName,
+    asanaProjectGidSuffix: asanaProjectGid.slice(-6),
     tasks,
     taskCount: tasks.length,
   };
@@ -309,6 +520,22 @@ export const fetchAsanaSprintTasksTool = createTool({
   inputSchema: asanaSprintFetchInputSchema,
   outputSchema: asanaSprintFetchOutputSchema,
   execute: fetchCompletedAsanaSprintTasks,
+});
+
+export const queryAsanaProjectTasksTool = createTool({
+  id: 'query_asana_project_tasks',
+  description: 'Search and filter Asana tasks from the Programs or KoachEx project by text, sprint, section, assignee, and completion state.',
+  inputSchema: asanaProjectTaskQueryInputSchema,
+  outputSchema: asanaProjectTaskQueryOutputSchema,
+  execute: queryAsanaProjectTasks,
+});
+
+export const getAsanaProjectStatusTool = createTool({
+  id: 'get_asana_project_status',
+  description: 'Summarize current Asana project status for Programs or KoachEx, grouped by section, sprint, and assignee.',
+  inputSchema: asanaProjectStatusInputSchema,
+  outputSchema: asanaProjectStatusOutputSchema,
+  execute: getAsanaProjectStatus,
 });
 
 export const postSlackReleaseNotesTool = createTool({
