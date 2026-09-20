@@ -26,13 +26,13 @@ const asanaProjectOptions = {
   KoachEx: '1216814037200456'
 } as const;
 
-const slackWebhookOptions = {
-  Programs: 'https://hooks.slack.com/services/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',
-  KoachEx: 'https://hooks.slack.com/services/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',
+const slackWebhookLabels = ['Programs', 'KoachEx'] as const;
+const slackWebhookEnvVars = {
+  Programs: 'SLACK_PROGRAMS_RELEASE_WEBHOOK_URL',
+  KoachEx: 'SLACK_KOACHEX_RELEASE_WEBHOOK_URL',
 } as const;
 
 const asanaProjectLabels = Object.keys(asanaProjectOptions) as [keyof typeof asanaProjectOptions];
-const slackWebhookLabels = Object.keys(slackWebhookOptions) as [keyof typeof slackWebhookOptions];
 
 export const asanaTaskSchema = z.object({
   gid: z.string(),
@@ -68,7 +68,7 @@ export const asanaSprintFetchOutputSchema = z.object({
 export const slackReleasePostInputSchema = z.object({
   markdown: z.string().min(1).describe('Release note body to send to Slack.'),
   slackWebhook: z.enum(slackWebhookLabels).default('Programs').describe('Named Slack destination for the release note.'),
-  webhookUrl: z.url().optional().describe('Optional Slack incoming webhook URL override. Falls back to the selected destination or SLACK_RELEASE_WEBHOOK_URL.'),
+  webhookUrl: z.url().optional().describe('Optional Slack incoming webhook URL override. Falls back to the selected destination environment variable.'),
 });
 
 export const slackReleasePostOutputSchema = z.object({
@@ -244,7 +244,7 @@ function resolveGithubRepo(owner?: string, repo?: string) {
     return { owner, repo };
   }
 
-  const repository = process.env.GITHUB_REPOSITORY;
+  const repository = process.env['GITHUB_REPOSITORY'];
   if (!repository) {
     throw new Error('GitHub repository is required. Provide owner and repo inputs or set GITHUB_REPOSITORY=owner/repo.');
   }
@@ -264,12 +264,13 @@ function resolveAsanaProjectGid(project: keyof typeof asanaProjectOptions, proje
   return projectGid ?? asanaProjectOptions[project];
 }
 
-function resolveSlackWebhookUrl(destination: keyof typeof slackWebhookOptions, webhookUrl?: string) {
-  return webhookUrl ?? slackWebhookOptions[destination] ?? process.env.SLACK_RELEASE_WEBHOOK_URL;
+function resolveSlackWebhookUrl(destination: typeof slackWebhookLabels[number], webhookUrl?: string) {
+  const destinationWebhook = process.env[slackWebhookEnvVars[destination]];
+  return webhookUrl ?? destinationWebhook;
 }
 
 export async function fetchCompletedAsanaSprintTasks(input: AsanaSprintFetchInput) {
-  const token = requireValue(process.env.ASANA_ACCESS_TOKEN, 'ASANA_ACCESS_TOKEN is required to read sprint tickets from Asana.');
+  const token = requireValue(process.env['ASANA_ACCESS_TOKEN'], 'ASANA_ACCESS_TOKEN is required to read sprint tickets from Asana.');
   const asanaProjectGid = resolveAsanaProjectGid(input.asanaProject, input.asanaProjectGid);
   const tasks: AsanaTask[] = [];
   let offset: string | undefined;
@@ -350,7 +351,7 @@ export async function fetchCompletedAsanaSprintTasks(input: AsanaSprintFetchInpu
 export async function postReleaseNotesToSlack(input: z.infer<typeof slackReleasePostInputSchema>) {
   const webhookUrl = requireValue(
     resolveSlackWebhookUrl(input.slackWebhook, input.webhookUrl),
-    'Slack webhook is required. Provide webhookUrl or set SLACK_RELEASE_WEBHOOK_URL.',
+    `Slack webhook is required. Provide webhookUrl or set ${slackWebhookEnvVars[input.slackWebhook]}.`,
   );
 
   const response = await fetch(webhookUrl, {
@@ -373,7 +374,7 @@ export async function postReleaseNotesToSlack(input: z.infer<typeof slackRelease
 }
 
 export async function upsertGithubReleaseNotes(input: GithubReleasePublishInput) {
-  const token = requireValue(process.env.GITHUB_TOKEN, 'GITHUB_TOKEN is required to publish release notes to GitHub.');
+  const token = requireValue(process.env['GITHUB_TOKEN'], 'GITHUB_TOKEN is required to publish release notes to GitHub.');
   const { owner, repo } = resolveGithubRepo(input.owner, input.repo);
   const existingRelease = await getGithubReleaseByTag(owner, repo, input.tagName, token);
 
